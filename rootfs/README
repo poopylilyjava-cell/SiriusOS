@@ -1,0 +1,3 @@
+The contents of the root filesystem. tools/mkimage.sh copies this tree onto the
+SIRIUS-ROOT partition, then adds the built programs under /bin: the bring-up
+programs from build/user, and the mlibc userland from build/userland/bin.

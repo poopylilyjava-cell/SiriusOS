@@ -1,0 +1,32 @@
+#! /bin/sh
+
+# wayland-scanner, for the build machine: it turns protocol XML into C, and
+# building libwayland for Sirius has to run it. This recipe also owns the
+# Wayland source tree and its patches; recipes/wayland borrows both.
+
+version=1.24.0
+revision=1
+tarball_url="https://gitlab.freedesktop.org/wayland/wayland/-/releases/${version}/downloads/wayland-${version}.tar.xz"
+tarball_sha256="82892487a01ad67b334eca83b54317a7c86a03a89cfadacfef5211f11a5d0536"
+imagedeps="build-essential meson ninja-build pkg-config libexpat1-dev"
+imagerundeps="libexpat1"
+
+configure() {
+    meson setup \
+        --prefix="${prefix}" \
+        --libdir=lib \
+        -Dlibraries=false \
+        -Dscanner=true \
+        -Dtests=false \
+        -Ddocumentation=false \
+        -Ddtd_validation=false \
+        . "${source_dir}"
+}
+
+build() {
+    ninja -j"${parallelism}"
+}
+
+package() {
+    DESTDIR="${dest_dir}" ninja install
+}

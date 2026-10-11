@@ -1,0 +1,21 @@
+Include <sys/ptrace.h> only where ptrace() is used.
+
+test-runner.c uses ptrace in exactly one place, to detect a debugger on
+systems with <sys/prctl.h> -- but includes the header unconditionally, so the
+test suite does not compile on a system that has neither. The fallback
+is_debugger_attached() for such systems is already there.
+
+--- a/tests/test-runner.c
++++ b/tests/test-runner.c
+@@ -38,10 +38,10 @@
+ #include <errno.h>
+ #include <limits.h>
+ #include <signal.h>
+-#include <sys/ptrace.h>
+ #ifdef HAVE_SYS_PROCCTL_H
+ #include <sys/procctl.h>
+ #elif defined(HAVE_SYS_PRCTL_H)
++#include <sys/ptrace.h>
+ #include <sys/prctl.h>
+ #ifndef PR_SET_PTRACER
+ # define PR_SET_PTRACER 0x59616d61

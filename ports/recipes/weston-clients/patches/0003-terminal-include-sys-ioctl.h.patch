@@ -1,0 +1,15 @@
+terminal: include <sys/ioctl.h> for ioctl()
+
+glibc's <pty.h> includes it; POSIX does not say it must, and mlibc's does
+not.
+
+--- a/clients/terminal.c	2026-10-11 04:55:38.194677427 +0200
++++ b/clients/terminal.c	2026-10-11 04:55:38.196038779 +0200
+@@ -34,6 +34,7 @@
+ #include <math.h>
+ #include <time.h>
+ #include <pty.h>
++#include <sys/ioctl.h>
+ #include <ctype.h>
+ #include <cairo.h>
+ #include <sys/epoll.h>

@@ -1,0 +1,31 @@
+#! /bin/sh
+
+# libffi: calling a C function whose signature is only known at run time.
+# libwayland dispatches every protocol message through it.
+
+version=3.5.2
+revision=1
+tarball_url="https://github.com/libffi/libffi/releases/download/v${version}/libffi-${version}.tar.gz"
+tarball_sha256="f3a3082a23b37c293a4fcd1053147b371f2ff91fa7ea1b2a52e335676bac82dc"
+imagedeps="build-essential"
+hostdeps="gcc binutils"
+deps="mlibc"
+
+configure() {
+    "${source_dir}"/configure \
+        --build="${SIRIUS_BUILD}" \
+        --host="${SIRIUS_TARGET}" \
+        --prefix="${prefix}" \
+        --disable-shared \
+        --enable-static \
+        --disable-docs \
+        --disable-multi-os-directory
+}
+
+build() {
+    make -j"${parallelism}"
+}
+
+package() {
+    DESTDIR="${dest_dir}" make install
+}

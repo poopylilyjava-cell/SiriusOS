@@ -1,0 +1,17 @@
+Build the Sirius sysdeps.
+
+The sysdeps themselves are not part of this patch: they live in the Sirius
+repository (user/libc/sysdeps/sirius) and toolchain/build-sirius.sh copies
+them into place.
+
+--- a/meson.build
++++ b/meson.build
+@@ -320,6 +320,8 @@
+ 	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', false)
+ 	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
+ 	subdir('sysdeps/ethereal')
++elif host_machine.system() == 'sirius'
++	subdir('sysdeps/sirius')
+ # ANCHOR: demo-sysdeps
+ elif host_machine.system() == 'demo'
+ 	subdir('sysdeps/demo')

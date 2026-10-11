@@ -1,0 +1,46 @@
+#! /bin/sh
+
+# The Sirius ports tree: third-party software, built for Sirius by jinx
+# (https://github.com/Mintsuki/Jinx) inside a pinned Debian container.
+#
+# Run it through tools/ports.sh, which fetches jinx and stages the sources
+# that live elsewhere in the repository. See ports/README.md.
+
+JINX_MAJOR_VER=0.11
+
+# The container's base image: Debian sid as of this instant.
+JINX_DEBIAN_SNAPSHOT=20260901T000000Z
+
+SIRIUS_TARGET=x86_64-sirius
+
+# The machine doing the building. Every autoconf recipe passes it as --build:
+# given --host alone, configure decides whether it is cross-compiling by
+# running a test program -- and a Sirius executable does start on Linux,
+# where its system call numbers mean something else. It tends to hang.
+SIRIUS_BUILD="$(uname -m)-pc-linux-gnu"
+
+# Meson's description of the target. Recipes that compile pass "compilers";
+# installing headers needs none. Libraries a port depends on are found by
+# pkg-config, looking only in the sysroot.
+sirius_cross_file() { # sirius_cross_file <file> [compilers]
+    {
+        if [ "${2:-}" = compilers ]; then
+            echo "[binaries]"
+            echo "c = '${SIRIUS_TARGET}-gcc'"
+            echo "cpp = '${SIRIUS_TARGET}-g++'"
+            echo "ar = '${SIRIUS_TARGET}-ar'"
+            echo "strip = '${SIRIUS_TARGET}-strip'"
+            echo "pkg-config = 'pkg-config'"
+            echo
+            echo "[properties]"
+            echo "sys_root = '${sysroot}'"
+            echo "pkg_config_libdir = '${sysroot}/usr/lib/pkgconfig:${sysroot}/usr/share/pkgconfig'"
+            echo
+        fi
+        echo "[host_machine]"
+        echo "system = 'sirius'"
+        echo "cpu_family = 'x86_64'"
+        echo "cpu = 'x86_64'"
+        echo "endian = 'little'"
+    } > "$1"
+}

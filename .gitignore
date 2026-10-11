@@ -1,0 +1,24 @@
+# build output
+/build/
+/toolchain/local/
+/toolchain/src/
+/toolchain/build/
+/sysroot/
+# jinx: staged and downloaded sources, and its container cache
+/ports/.staging/
+/ports/.jinx-cache/
+/ports/sources/
+/ports/host-sources/
+*.o
+*.d
+*.elf
+*.img
+*.iso
+*.log
+
+# editor / tooling
+compile_commands.json
+.cache/
+.vscode/
+.idea/
+*.swp

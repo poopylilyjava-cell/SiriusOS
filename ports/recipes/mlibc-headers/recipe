@@ -1,0 +1,27 @@
+#! /bin/sh
+
+# The C library's headers alone: GCC needs them to build libgcc, before
+# there is a compiler to build the library itself with.
+
+version=7.0.0
+revision=1
+source_dir=".staging/mlibc"
+imagedeps="meson ninja-build"
+
+configure() {
+    sirius_cross_file cross.txt
+    meson setup \
+        --cross-file cross.txt \
+        --prefix="${prefix}" \
+        --libdir=lib \
+        -Dheaders_only=true \
+        . "${source_dir}"
+}
+
+build() {
+    ninja
+}
+
+package() {
+    DESTDIR="${dest_dir}" ninja install
+}

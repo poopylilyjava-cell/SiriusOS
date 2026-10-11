@@ -1,0 +1,39 @@
+#! /bin/sh
+
+# libxkbcommon: keymaps. A Wayland compositor sends each client the keymap
+# as text (siriusd's are in user/siriusd/wayland/keymaps, made by this same
+# version's xkbcli); the client compiles it with this library and turns key
+# codes into characters. No keymap database is installed: none is needed to
+# compile a complete keymap.
+
+version=1.13.2
+revision=1
+tarball_url="https://github.com/xkbcommon/libxkbcommon/archive/refs/tags/xkbcommon-${version}.tar.gz"
+tarball_sha256="acc4d5f7c3cbba5f9f8d08d8bdbeede84ecede46792f47929aa9321873385528"
+imagedeps="build-essential meson ninja-build pkg-config bison"
+hostdeps="gcc binutils"
+deps="mlibc"
+
+configure() {
+    sirius_cross_file cross.txt compilers
+    meson setup \
+        --cross-file cross.txt \
+        --prefix="${prefix}" \
+        --libdir=lib \
+        -Ddefault_library=static \
+        -Denable-tools=false \
+        -Denable-x11=false \
+        -Denable-wayland=false \
+        -Denable-xkbregistry=false \
+        -Denable-docs=false \
+        -Denable-bash-completion=false \
+        . "${source_dir}"
+}
+
+build() {
+    ninja -j"${parallelism}"
+}
+
+package() {
+    DESTDIR="${dest_dir}" ninja install
+}

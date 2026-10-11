@@ -1,0 +1,13 @@
+Teach config.sub the sirius operating system, so that configure accepts
+--host=x86_64-sirius.
+
+--- a/config.sub
++++ b/config.sub
+@@ -2104,6 +2104,7 @@
+ 	| secbsd* \
+ 	| sei* \
+ 	| serenity* \
++	| sirius* \
+ 	| sim* \
+ 	| skyos* \
+ 	| solaris* \

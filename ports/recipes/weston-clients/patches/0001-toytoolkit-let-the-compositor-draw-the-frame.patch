@@ -1,0 +1,194 @@
+toytoolkit: let the compositor draw the window's frame
+
+Ask for server-side decorations (xdg-decoration) where the compositor
+offers them, and draw no frame of the toolkit's own when it agrees -- as
+for a fullscreen window. The Sirius desktop draws every window's title bar
+and border, with Dear ImGui; without this, weston's clients would have two.
+
+--- a/clients/window.c
++++ b/clients/window.c
+@@ -56,6 +56,7 @@
+ #include "shared/xalloc.h"
+ #include <libweston/zalloc.h>
+ #include "xdg-shell-client-protocol.h"
++#include "xdg-decoration-unstable-v1-client-protocol.h"
+ #include "color-management-v1-client-protocol.h"
+ #include "text-cursor-position-client-protocol.h"
+ #include "pointer-constraints-unstable-v1-client-protocol.h"
+@@ -117,6 +118,10 @@
+ 
+ 	struct theme *theme;
+ 
++	/* Where the compositor offers to draw windows' frames (the Sirius
++	 * desktop does), the toolkit lets it. */
++	struct zxdg_decoration_manager_v1 *decoration_manager;
++
+ 	struct wl_cursor_theme *cursor_theme;
+ 	struct wl_cursor **cursors;
+ 
+@@ -258,6 +263,9 @@
+ 
+ 	int fullscreen;
+ 	int maximized;
++	/* The compositor draws this window's frame: draw none. */
++	int server_side_decorations;
++	struct zxdg_toplevel_decoration_v1 *decoration;
+ 
+ 	window_key_handler_t key_handler;
+ 	window_keyboard_focus_handler_t keyboard_focus_handler;
+@@ -1633,6 +1641,9 @@
+ 	if (window->frame)
+ 		window_frame_destroy(window->frame);
+ 
++	/* Before its toplevel, as xdg-decoration requires. */
++	if (window->decoration)
++		zxdg_toplevel_decoration_v1_destroy(window->decoration);
+ 	if (window->xdg_toplevel)
+ 		xdg_toplevel_destroy(window->xdg_toplevel);
+ 	if (window->xdg_popup)
+@@ -2268,6 +2279,14 @@
+ 	return 0;
+ }
+ 
++/* Is the window drawn without the toolkit's frame -- because it fills
++ * the screen, or because the compositor draws the frame instead? */
++static int
++window_frameless(struct window *window)
++{
++	return window->fullscreen || window->server_side_decorations;
++}
++
+ static void
+ frame_resize_handler(struct widget *widget,
+ 		     int32_t width, int32_t height, void *data)
+@@ -2278,7 +2297,7 @@
+ 	struct rectangle input;
+ 	struct rectangle opaque;
+ 
+-	if (widget->window->fullscreen) {
++	if (window_frameless(widget->window)) {
+ 		interior.x = 0;
+ 		interior.y = 0;
+ 		interior.width = width;
+@@ -2296,7 +2315,7 @@
+ 		child->resize_handler(child, interior.width, interior.height,
+ 				      child->user_data);
+ 
+-		if (widget->window->fullscreen) {
++		if (window_frameless(widget->window)) {
+ 			width = child->allocation.width;
+ 			height = child->allocation.height;
+ 		} else {
+@@ -2312,7 +2331,7 @@
+ 
+ 	widget->surface->input_region =
+ 		wl_compositor_create_region(widget->window->display->compositor);
+-	if (!widget->window->fullscreen) {
++	if (!window_frameless(widget->window)) {
+ 		frame_input_rect(frame->frame, &input.x, &input.y,
+ 				 &input.width, &input.height);
+ 		wl_region_add(widget->surface->input_region,
+@@ -2324,7 +2343,7 @@
+ 	widget_set_allocation(widget, 0, 0, width, height);
+ 
+ 	if (child->opaque) {
+-		if (!widget->window->fullscreen) {
++		if (!window_frameless(widget->window)) {
+ 			frame_opaque_rect(frame->frame, &opaque.x, &opaque.y,
+ 					  &opaque.width, &opaque.height);
+ 
+@@ -2348,7 +2367,7 @@
+ 	struct window_frame *frame = data;
+ 	struct window *window = widget->window;
+ 
+-	if (window->fullscreen)
++	if (window_frameless(window))
+ 		return;
+ 
+ 	cr = widget_cairo_create(widget);
+@@ -2701,7 +2720,7 @@
+ 	int width, height;
+ 	int margin = widget->window->maximized ? 0 : t->margin;
+ 
+-	if (!widget->window->fullscreen) {
++	if (!window_frameless(widget->window)) {
+ 		decoration_width = (t->width + margin) * 2;
+ 		decoration_height = t->width +
+ 			t->titlebar_height + margin * 2;
+@@ -4412,7 +4431,7 @@
+ static int
+ window_get_shadow_margin(struct window *window)
+ {
+-	if (window->frame && !window->fullscreen)
++	if (window->frame && !window_frameless(window))
+ 		return frame_get_shadow_margin(window->frame->frame);
+ 	else
+ 		return 0;
+@@ -4569,7 +4588,7 @@
+ static void
+ window_get_geometry(struct window *window, struct rectangle *geometry)
+ {
+-	if (window->frame && !window->fullscreen)
++	if (window->frame && !window_frameless(window))
+ 		frame_input_rect(window->frame->frame,
+ 				 &geometry->x,
+ 				 &geometry->y,
+@@ -5405,6 +5424,28 @@
+ 	return window;
+ }
+ 
++static void
++decoration_configure(void *data, struct zxdg_toplevel_decoration_v1 *decoration,
++		     uint32_t mode)
++{
++	struct window *window = data;
++	int server_side = mode == ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
++
++	if (window->server_side_decorations == server_side)
++		return;
++	window->server_side_decorations = server_side;
++	/* The frame comes or goes: lay the window out again, keeping the
++	 * size of what is inside it. */
++	if (window->main_surface->allocation.width > 0)
++		window_schedule_resize(window,
++				       window->main_surface->allocation.width,
++				       window->main_surface->allocation.height);
++}
++
++static const struct zxdg_toplevel_decoration_v1_listener decoration_listener = {
++	decoration_configure,
++};
++
+ struct window *
+ window_create(struct display *display)
+ {
+@@ -5428,6 +5469,18 @@
+ 		xdg_toplevel_add_listener(window->xdg_toplevel,
+ 					  &xdg_toplevel_listener, window);
+ 
++		if (window->display->decoration_manager) {
++			window->decoration =
++				zxdg_decoration_manager_v1_get_toplevel_decoration(
++					window->display->decoration_manager,
++					window->xdg_toplevel);
++			zxdg_toplevel_decoration_v1_add_listener(window->decoration,
++								 &decoration_listener,
++								 window);
++			zxdg_toplevel_decoration_v1_set_mode(window->decoration,
++				ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
++		}
++
+ 		window_inhibit_redraw(window);
+ 
+ 		wl_surface_commit(window->main_surface->surface);
+@@ -6758,6 +6811,10 @@
+ 		d->shm = wl_registry_bind(registry, id, &wl_shm_interface, 1);
+ 	} else if (strcmp(interface, "wl_data_device_manager") == 0) {
+ 		display_add_data_device(d, id, version);
++	} else if (strcmp(interface, "zxdg_decoration_manager_v1") == 0) {
++		d->decoration_manager =
++			wl_registry_bind(registry, id,
++					 &zxdg_decoration_manager_v1_interface, 1);
+ 	} else if (strcmp(interface, "xdg_wm_base") == 0) {
+ 		d->xdg_shell = wl_registry_bind(registry, id,
+ 						&xdg_wm_base_interface,

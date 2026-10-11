@@ -1,0 +1,49 @@
+#! /bin/sh
+
+# libwayland: the client and server libraries, and their test suite.
+#
+# The tests are not something Wayland installs. They are here because they
+# are M6's exit test: each is a program that exercises the sockets, the
+# descriptor passing, the event loop and the signals libwayland is built on,
+# and /bin/wltest runs them on Sirius. They go to /usr/libexec/wayland-tests.
+
+version=1.24.0
+revision=1
+from_host_source=wayland-scanner
+imagedeps="build-essential meson ninja-build pkg-config"
+hostdeps="gcc binutils wayland-scanner"
+# libstdcxx: one of the tests is a C++ program that includes the headers.
+deps="mlibc libstdcxx libffi"
+
+# Wayland asks for strict POSIX.1-2008 and then uses a few things outside it
+# (useconds_t, for one) that glibc declares regardless and mlibc does not.
+# _GNU_SOURCE declares everything, as it would on Linux.
+configure() {
+    sirius_cross_file cross.txt compilers
+    meson setup \
+        --cross-file cross.txt \
+        -Dc_args=-D_GNU_SOURCE \
+        --prefix="${prefix}" \
+        --libdir=lib \
+        -Ddefault_library=static \
+        -Dscanner=false \
+        -Dtests=true \
+        -Ddocumentation=false \
+        -Ddtd_validation=false \
+        . "${source_dir}"
+}
+
+build() {
+    ninja -j"${parallelism}"
+}
+
+package() {
+    DESTDIR="${dest_dir}" ninja install
+
+    # Stripped: the kernel loads an executable whole, and limits its size.
+    mkdir -p "${dest_dir}${prefix}/libexec/wayland-tests"
+    for program in tests/*-test tests/exec-fd-leak-checker; do
+        [ -f "${program}" ] || continue
+        "${SIRIUS_TARGET}-strip" -o "${dest_dir}${prefix}/libexec/wayland-tests/$(basename "${program}")" "${program}"
+    done
+}

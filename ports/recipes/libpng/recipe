@@ -1,0 +1,31 @@
+#! /bin/sh
+
+# libpng: PNG images. cairo writes them; the weston clients read their
+# window frame's icons with it.
+
+version=1.6.50
+revision=1
+tarball_url="https://download.sourceforge.net/libpng/libpng-${version}.tar.xz"
+tarball_sha256="4df396518620a7aa3651443e87d1b2862e4e88cad135a8b93423e01706232307"
+imagedeps="build-essential"
+hostdeps="gcc binutils"
+deps="mlibc zlib"
+
+configure() {
+    "${source_dir}"/configure \
+        --build="${SIRIUS_BUILD}" \
+        --host="${SIRIUS_TARGET}" \
+        --prefix="${prefix}" \
+        --disable-shared \
+        --enable-static \
+        --disable-tests \
+        --disable-tools
+}
+
+build() {
+    make -j"${parallelism}"
+}
+
+package() {
+    DESTDIR="${dest_dir}" make install
+}

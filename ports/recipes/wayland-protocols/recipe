@@ -1,0 +1,29 @@
+#! /bin/sh
+
+# wayland-protocols: the XML of the protocols beyond Wayland's core --
+# xdg-shell, xdg-decoration, viewporter and the rest. Data, not code: the
+# weston clients generate their protocol code from it. (siriusd keeps its own
+# copies of the two it serves, in user/siriusd/wayland/protocols.)
+
+version=1.45
+revision=1
+tarball_url="https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/${version}/downloads/wayland-protocols-${version}.tar.xz"
+tarball_sha256="4d2b2a9e3e099d017dc8107bf1c334d27bb87d9e4aff19a0c8d856d17cd41ef0"
+imagedeps="meson ninja-build pkg-config"
+# Its build checks for the scanner, which only its tests would use.
+hostdeps="wayland-scanner"
+
+configure() {
+    meson setup \
+        --prefix="${prefix}" \
+        -Dtests=false \
+        . "${source_dir}"
+}
+
+build() {
+    ninja -j"${parallelism}"
+}
+
+package() {
+    DESTDIR="${dest_dir}" ninja install
+}

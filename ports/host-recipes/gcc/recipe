@@ -1,0 +1,51 @@
+#! /bin/sh
+
+# The compiler and libgcc; libstdc++ is a recipe of its own (libstdcxx),
+# because it can only be built once mlibc exists. Same patch and flags as
+# toolchain/build-sirius.sh: keep the two in step.
+
+version=16.2.0
+revision=2
+tarball_url="https://ftp.gnu.org/gnu/gcc/gcc-${version}/gcc-${version}.tar.xz"
+tarball_sha256="e6738e29597f733270731aa90600f37ffdc045079dfc27ec7e8192cc81085c3e"
+source_imagedeps="autoconf2.69"
+imagedeps="build-essential libgmp-dev libmpfr-dev libmpc-dev"
+# cc1 is linked against the container's GMP, MPFR and MPC, so every
+# container that runs the compiler needs their runtime halves.
+imagerundeps="libgmp10 libmpfr6 libmpc3"
+hostdeps="binutils"
+hostrundeps="binutils"
+# libgcc is compiled against the C library's headers.
+deps="mlibc-headers"
+
+# The patch adds a sirius case to libstdc++'s crossconfig.m4; its configure
+# must be regenerated, with exactly the autoconf GCC was released with.
+prepare() {
+    ( cd libstdc++-v3 && autoconf2.69 && rm -rf autom4te.cache )
+}
+
+# The C++ headers come from the libstdcxx package, which installs into the
+# sysroot rather than beside the compiler.
+configure() {
+    "${source_dir}"/configure \
+        --prefix="${prefix}" \
+        --target="${SIRIUS_TARGET}" \
+        --with-sysroot="${sysroot}" \
+        --with-gxx-include-dir="${sysroot}/usr/include/c++/${version}" \
+        --enable-languages=c,c++ \
+        --enable-threads=posix \
+        --enable-initfini-array \
+        --disable-nls \
+        --disable-shared \
+        --disable-multilib \
+        --disable-bootstrap
+}
+
+build() {
+    make -j"${parallelism}" all-gcc
+    make -j"${parallelism}" all-target-libgcc
+}
+
+package() {
+    DESTDIR="${dest_dir}" make install-gcc install-target-libgcc
+}

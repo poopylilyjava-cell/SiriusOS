@@ -1,0 +1,46 @@
+#! /bin/sh
+
+# Two of Weston's demonstration clients -- weston-simple-shm, which animates
+# a pattern in shared memory, and weston-terminal, a terminal emulator on
+# Weston's toolkit -- and nothing else of Weston. They are M8's exit test:
+# real Wayland programs, unchanged but for two patches, in windows siriusd
+# draws.
+#
+# The patches add the build (sirius/Makefile: Weston's own needs the
+# compositor's dependencies) and teach the toolkit to accept server-side
+# decorations. Installed in /usr/bin, with the toolkit's icons in
+# /usr/share/weston.
+
+version=14.0.2
+revision=1
+tarball_url="https://gitlab.freedesktop.org/wayland/weston/-/releases/${version}/downloads/weston-${version}.tar.xz"
+tarball_sha256="b47216b3530da76d02a3a1acbf1846a9cd41d24caa86448f9c46f78f20b6e0ac"
+imagedeps="build-essential pkg-config"
+hostdeps="gcc binutils wayland-scanner"
+deps="mlibc libffi wayland wayland-protocols libxkbcommon cairo pixman libpng zlib"
+
+# Everything the Makefile takes: the cross compiler, and pkg-config looking
+# in the sysroot only.
+sirius_make() {
+    make -f "${source_dir}/sirius/Makefile" \
+        SRC="${source_dir}" \
+        CC="${SIRIUS_TARGET}-gcc" \
+        STATIC=1 \
+        PKG_CONFIG="env PKG_CONFIG_SYSROOT_DIR=${sysroot} PKG_CONFIG_LIBDIR=${sysroot}${prefix}/lib/pkgconfig:${sysroot}${prefix}/share/pkgconfig pkg-config" \
+        WAYLAND_PROTOCOLS="${sysroot}${prefix}/share/wayland-protocols" \
+        EXTRA_CPPFLAGS="-I${source_dir}/sirius/include" \
+        PREFIX="${prefix}" \
+        "$@"
+}
+
+build() {
+    sirius_make -j"${parallelism}"
+}
+
+package() {
+    sirius_make install DESTDIR="${dest_dir}"
+    # Stripped: the kernel reads an executable whole.
+    for program in "${dest_dir}${prefix}"/bin/weston-*; do
+        "${SIRIUS_TARGET}-strip" "${program}"
+    done
+}

@@ -1,0 +1,12 @@
+[submodule "third_party/limine"]
+	path = third_party/limine
+	url = https://github.com/limine-bootloader/limine
+	branch = v11.x-binary
+[submodule "third_party/imgui"]
+	path = third_party/imgui
+	url = https://github.com/ocornut/imgui
+	branch = docking
+[submodule "third_party/limine-protocol"]
+	path = third_party/limine-protocol
+	url = https://github.com/limine-bootloader/limine-protocol
+	branch = trunk

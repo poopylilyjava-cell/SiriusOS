@@ -1,0 +1,134 @@
+Build the demonstration clients alone, without meson
+
+Weston's meson build will not configure without libinput, libdrm and
+udev, which only the compositor half needs. sirius/Makefile builds
+weston-simple-shm and weston-terminal with any compiler and pkg-config,
+and sirius/include/linux/input.h stands in for the one Linux header they
+use (Sirius's key codes are evdev's).
+
+diff --color -ruN a/sirius/include/linux/input.h b/sirius/include/linux/input.h
+--- a/sirius/include/linux/input.h
++++ b/sirius/include/linux/input.h
+@@ -0,0 +1,15 @@
++/* What Weston's clients use of Linux's <linux/input.h>: the codes of the
++ * keys and buttons they name. Sirius delivers evdev's codes (ADR 0009), so
++ * they are the same numbers, from the kernel's own header. Added by the
++ * Sirius port (ports/recipes/weston-clients). */
++#ifndef SIRIUS_LINUX_INPUT_H
++#define SIRIUS_LINUX_INPUT_H
++
++#include <sirius/input.h>
++
++#define BTN_LEFT        SIRIUS_BTN_LEFT
++#define BTN_RIGHT       SIRIUS_BTN_RIGHT
++#define BTN_MIDDLE      SIRIUS_BTN_MIDDLE
++#define KEY_ESC         SIRIUS_KEY_ESC
++
++#endif
+diff --color -ruN a/sirius/Makefile b/sirius/Makefile
+--- a/sirius/Makefile
++++ b/sirius/Makefile
+@@ -0,0 +1,103 @@
++# Weston's demonstration clients, and nothing else of Weston.
++#
++# Added by the Sirius port (ports/recipes/weston-clients). The compositor
++# half of Weston needs libinput, libdrm and udev, and Weston's meson build
++# will not configure without them; the clients need none of that. This
++# builds two of them -- weston-simple-shm and weston-terminal -- with
++# whatever compiler and pkg-config it is given, so the same file serves a
++# cross build for Sirius and a native one for testing on Linux:
++#
++#   make -f sirius/Makefile SRC=<weston source> WAYLAND_PROTOCOLS=<dir> \
++#        [CC=...] [PKG_CONFIG=...] [STATIC=1] [EXTRA_CPPFLAGS=...]
++#   make -f sirius/Makefile install DESTDIR=... PREFIX=/usr
++
++SRC ?= .
++CC ?= cc
++PKG_CONFIG ?= pkg-config
++WAYLAND_SCANNER ?= wayland-scanner
++WAYLAND_PROTOCOLS ?= $(shell $(PKG_CONFIG) --variable=pkgdatadir wayland-protocols)
++PREFIX ?= /usr
++DESTDIR ?=
++CFLAGS ?= -O2 -g
++STATIC ?=
++
++PACKAGES := wayland-client wayland-cursor xkbcommon cairo pixman-1 libpng
++PKG_CFLAGS := $(shell $(PKG_CONFIG) --cflags $(PACKAGES))
++PKG_LIBS := $(shell $(PKG_CONFIG) $(if $(STATIC),--static) --libs $(PACKAGES))
++SHM_LIBS := $(shell $(PKG_CONFIG) $(if $(STATIC),--static) --libs wayland-client)
++
++CPPFLAGS += -I. -I$(SRC) -I$(SRC)/include -I$(SRC)/shared $(EXTRA_CPPFLAGS)
++# libwayland-cursor has functions of these names too, which a shared library
++# would hide and a static one does not: Weston's are renamed.
++CPPFLAGS += -Dos_create_anonymous_file=weston_os_create_anonymous_file 	-Dos_resize_anonymous_file=weston_os_resize_anonymous_file
++ALL_CFLAGS := $(CFLAGS) -std=gnu11 -Wno-unused-parameter -Wno-missing-field-initializers -Wno-sign-compare $(PKG_CFLAGS)
++LDFLAGS += $(if $(STATIC),-static)
++
++# Protocols: from wayland-protocols, and Weston's own.
++PROTOCOL_XML := \
++	$(WAYLAND_PROTOCOLS)/stable/xdg-shell/xdg-shell.xml \
++	$(WAYLAND_PROTOCOLS)/stable/viewporter/viewporter.xml \
++	$(WAYLAND_PROTOCOLS)/unstable/relative-pointer/relative-pointer-unstable-v1.xml \
++	$(WAYLAND_PROTOCOLS)/unstable/pointer-constraints/pointer-constraints-unstable-v1.xml \
++	$(WAYLAND_PROTOCOLS)/unstable/tablet/tablet-unstable-v2.xml \
++	$(WAYLAND_PROTOCOLS)/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml \
++	$(SRC)/protocol/text-cursor-position.xml \
++	$(SRC)/protocol/ivi-application.xml \
++	$(SRC)/protocol/color-management-v1.xml
++PROTOCOLS := $(basename $(notdir $(PROTOCOL_XML)))
++PROTOCOL_HEADERS := $(PROTOCOLS:%=%-client-protocol.h)
++PROTOCOL_OBJECTS := $(PROTOCOLS:%=%-protocol.o)
++
++SHARED := config-parser option-parser file-util os-compatibility process-util hash
++CAIRO_SHARED := image-loader cairo-util frame matrix
++
++PROGRAMS := weston-simple-shm weston-terminal
++
++all: $(PROGRAMS)
++
++# What weston's meson build would have put in config.h, for these files.
++# No posix_fallocate: where it is missing it fails with ENOSYS, which
++# os-compatibility.c treats as an error instead of falling back.
++config.h:
++	printf '%s\n' \
++		'#define _GNU_SOURCE 1' '#define _ALL_SOURCE 1' \
++		'#define PACKAGE_STRING "weston 14.0.2"' '#define PACKAGE_VERSION "14.0.2"' '#define VERSION "14.0.2"' \
++		'#define PACKAGE_URL "https://wayland.freedesktop.org"' \
++		'#define PACKAGE_BUGREPORT "https://gitlab.freedesktop.org/wayland/weston/issues/"' \
++		'#define BINDIR "$(PREFIX)/bin"' '#define DATADIR "$(PREFIX)/share"' '#define LIBEXECDIR "$(PREFIX)/libexec"' \
++		'#define HAVE_MEMFD_CREATE 1' '#define HAVE_MKOSTEMP 1' '#define HAVE_STRCHRNUL 1' \
++		'#define HAVE_XKBCOMMON_COMPOSE 1' > $@
++
++define protocol_rules
++$(1)-client-protocol.h: $(2)
++	$$(WAYLAND_SCANNER) client-header $$< $$@
++$(1)-protocol.c: $(2)
++	$$(WAYLAND_SCANNER) private-code $$< $$@
++endef
++$(foreach xml,$(PROTOCOL_XML),$(eval $(call protocol_rules,$(basename $(notdir $(xml))),$(xml))))
++
++%.o: $(SRC)/shared/%.c config.h $(PROTOCOL_HEADERS)
++	$(CC) $(CPPFLAGS) $(ALL_CFLAGS) -c -o $@ $<
++%.o: $(SRC)/clients/%.c config.h $(PROTOCOL_HEADERS)
++	$(CC) $(CPPFLAGS) $(ALL_CFLAGS) -c -o $@ $<
++%-protocol.o: %-protocol.c
++	$(CC) $(CPPFLAGS) $(ALL_CFLAGS) -c -o $@ $<
++
++weston-simple-shm: simple-shm.o xdg-shell-protocol.o ivi-application-protocol.o $(SHARED:%=%.o)
++	$(CC) $(LDFLAGS) -o $@ $^ $(SHM_LIBS)
++
++weston-terminal: terminal.o window.o $(PROTOCOL_OBJECTS) $(SHARED:%=%.o) $(CAIRO_SHARED:%=%.o)
++	$(CC) $(LDFLAGS) -o $@ $^ $(PKG_LIBS) -lutil -lm
++
++# The frame's icons: the toolkit will not make a window without them.
++DATA := icon_window.png sign_close.png sign_maximize.png sign_minimize.png
++
++install: all
++	mkdir -p $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/share/weston
++	cp $(PROGRAMS) $(DESTDIR)$(PREFIX)/bin/
++	cd $(SRC)/data && cp $(DATA) $(DESTDIR)$(PREFIX)/share/weston/
++
++clean:
++	rm -f config.h *.o *-protocol.c *-client-protocol.h $(PROGRAMS)
++
++.PHONY: all install clean

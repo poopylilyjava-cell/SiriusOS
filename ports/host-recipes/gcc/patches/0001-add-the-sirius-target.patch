@@ -1,0 +1,138 @@
+--- a/config.sub
++++ b/config.sub
+@@ -1749,7 +1749,7 @@
+ 	     | onefs* | tirtos* | phoenix* | fuchsia* | redox* | bme* \
+ 	     | midnightbsd* | amdhsa* | unleashed* | emscripten* | wasi* \
+ 	     | nsk* | powerunix* | genode* | zvmoe* | qnx* | emx* | zephyr* \
+-	     | fiwix* )
++	     | fiwix* | sirius* )
+ 		;;
+ 	# This one is extra strict with allowed versions
+ 	sco3.2v2 | sco3.2v[4-9]* | sco5v6*)
+--- a/fixincludes/mkfixinc.sh
++++ b/fixincludes/mkfixinc.sh
+@@ -19,6 +19,7 @@
+     powerpcle-*-eabisim* | \
+     powerpcle-*-eabi* | \
+     *-*-vxworks7* | \
++    *-sirius* | \
+     *-musl* )
+ 	#  IF there is no include fixing,
+ 	#  THEN create a no-op fixer and exit
+--- a/gcc/config.gcc
++++ b/gcc/config.gcc
+@@ -932,6 +932,18 @@
+   rust_target_objs="${rust_target_objs} freebsd-rust.o"
+   target_has_targetrustm=yes
+   ;;
++*-*-sirius*)
++  # -pthread and -rdynamic: accepted, as every build system assumes. Threads
++  # are part of the C library, so -pthread links nothing extra.
++  extra_options="$extra_options gnu-user.opt"
++  gas=yes
++  gnu_ld=yes
++  default_use_cxa_atexit=yes
++  use_gcc_stdint=wrap
++  case ${enable_threads} in
++    "" | yes | posix) thread_file='posix' ;;
++  esac
++  ;;
+ *-*-fuchsia*)
+   native_system_header_dir=/include
+   tmake_file="t-fuchsia"
+@@ -2030,6 +2042,9 @@
+ 	tm_file="${tm_file} i386/unix.h i386/att.h elfos.h dragonfly.h dragonfly-stdint.h i386/dragonfly.h"
+ 	tmake_file="${tmake_file} i386/t-crtstuff"
+ 	;;
++x86_64-*-sirius*)
++	tm_file="${tm_file} i386/unix.h i386/att.h elfos.h glibc-stdint.h i386/i386elf.h i386/x86-64.h sirius.h"
++	;;
+ x86_64-*-dragonfly*)
+ 	tm_file="${tm_file} i386/unix.h i386/att.h elfos.h dragonfly.h dragonfly-stdint.h i386/x86-64.h i386/dragonfly.h"
+ 	tmake_file="${tmake_file} i386/t-crtstuff"
+--- /dev/null
++++ b/gcc/config/sirius.h
+@@ -0,0 +1,39 @@
++/* Sirius OS: an ELF target with mlibc as its C library.
++
++   Programs are statically linked for now -- the kernel loads ET_EXEC images
++   only -- so the driver always passes -static and there is no dynamic
++   linker to name.  */
++
++#undef  TARGET_SIRIUS
++#define TARGET_SIRIUS 1
++
++#undef  LIB_SPEC
++#define LIB_SPEC "-lc"
++
++/* crt1.o, crti.o and crtn.o come from mlibc's Sirius sysdeps; crtbegin.o and
++   crtend.o from libgcc.  */
++#undef  STARTFILE_SPEC
++#define STARTFILE_SPEC "crt1.o%s crti.o%s crtbegin.o%s"
++
++#undef  ENDFILE_SPEC
++#define ENDFILE_SPEC "crtend.o%s crtn.o%s"
++
++#undef  LINK_SPEC
++#define LINK_SPEC "-static -z max-page-size=4096"
++
++/* As on GNU systems, C++ sees the C library's whole API: libstdc++ needs
++   more of it than ISO C declares, and so do mlibc's own C++ sources.  */
++#undef  CPLUSPLUS_CPP_SPEC
++#define CPLUSPLUS_CPP_SPEC "-D_GNU_SOURCE %(cpp)"
++
++#undef  TARGET_OS_CPP_BUILTINS
++#define TARGET_OS_CPP_BUILTINS()		\
++  do						\
++    {						\
++      builtin_define ("__sirius__");		\
++      builtin_define ("__unix__");		\
++      builtin_assert ("system=sirius");		\
++      builtin_assert ("system=unix");		\
++      builtin_assert ("system=posix");		\
++    }						\
++  while (false)
+--- a/libgcc/config.host
++++ b/libgcc/config.host
+@@ -293,6 +293,10 @@
+       ;;
+   esac
+   ;;
++*-*-sirius*)
++  tmake_file="$tmake_file t-crtstuff-pic t-libgcc-pic"
++  extra_parts="crtbegin.o crtend.o"
++  ;;
+ *-*-fuchsia*)
+   tmake_file="$tmake_file t-crtstuff-pic t-libgcc-pic t-eh-dw2-dip t-slibgcc t-slibgcc-fuchsia"
+   extra_parts="crtbegin.o crtend.o"
+@@ -754,6 +758,9 @@
+ 	    ;;
+ 	esac
+ 	;;
++x86_64-*-sirius*)
++	tmake_file="$tmake_file i386/t-crtstuff"
++	;;
+ x86_64-*-fuchsia*)
+ 	tmake_file="$tmake_file t-libgcc-pic"
+ 	;;
+--- a/libstdc++-v3/crossconfig.m4
++++ b/libstdc++-v3/crossconfig.m4
+@@ -136,6 +136,18 @@
+     AC_CHECK_FUNCS(uselocale)
+     ;;
+ 
++  *-sirius*)
++    GLIBCXX_CHECK_COMPILER_FEATURES
++    GLIBCXX_CHECK_LINKER_FEATURES
++    GLIBCXX_CHECK_MATH_SUPPORT
++    GLIBCXX_CHECK_STDLIB_SUPPORT
++    AC_DEFINE(_GLIBCXX_USE_DEV_RANDOM)
++    AC_DEFINE(_GLIBCXX_USE_RANDOM_TR1)
++    GCC_CHECK_TLS
++    AC_CHECK_FUNCS(aligned_alloc posix_memalign memalign _aligned_malloc)
++    AC_CHECK_FUNCS(timespec_get)
++    ;;
++
+   *-fuchsia*)
+     SECTION_FLAGS='-ffunction-sections -fdata-sections'
+     AC_SUBST(SECTION_FLAGS)

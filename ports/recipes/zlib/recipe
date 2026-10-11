@@ -1,0 +1,26 @@
+#! /bin/sh
+
+# The first real port: small, dependency-free, and wanted by nearly
+# everything that comes after it (libpng, freetype, ...).
+
+version=1.3.1
+revision=1
+tarball_url="https://github.com/madler/zlib/releases/download/v${version}/zlib-${version}.tar.xz"
+tarball_sha256="38ef96b8dfe510d42707d9c781877914792541133e1870841463bfa73f883e32"
+imagedeps="build-essential"
+hostdeps="gcc binutils"
+deps="mlibc"
+
+# zlib's configure is hand-written and builds in its source directory.
+configure() {
+    cp -rp "${source_dir}"/. ./
+    CHOST="${SIRIUS_TARGET}" ./configure --prefix="${prefix}" --static
+}
+
+build() {
+    make -j"${parallelism}"
+}
+
+package() {
+    DESTDIR="${dest_dir}" make install
+}

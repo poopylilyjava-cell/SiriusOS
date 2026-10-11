@@ -1,0 +1,31 @@
+#! /bin/sh
+
+# libstdc++, configured on its own out of GCC's source tree once mlibc is
+# installed, so that its configure tests link against the real C library.
+
+version=16.2.0
+revision=1
+from_host_source=gcc
+imagedeps="build-essential"
+hostdeps="gcc binutils"
+deps="mlibc"
+
+configure() {
+    "${source_dir}"/libstdc++-v3/configure \
+        --build="${SIRIUS_BUILD}" \
+        --host="${SIRIUS_TARGET}" \
+        --prefix="${prefix}" \
+        --with-gxx-include-dir="${prefix}/include/c++/${version}" \
+        --disable-multilib \
+        --disable-nls \
+        --disable-shared \
+        --disable-libstdcxx-pch
+}
+
+build() {
+    make -j"${parallelism}"
+}
+
+package() {
+    DESTDIR="${dest_dir}" make install
+}

@@ -1,0 +1,49 @@
+#! /bin/sh
+
+# cairo: 2D drawing into memory, over pixman. The weston clients' toolkit
+# draws with it.
+#
+# Without FreeType and fontconfig: text set in "monospace" comes out in
+# cairo's built-in stroked font ("twin"), which needs no font files.
+
+version=1.18.4
+revision=1
+tarball_url="https://cairographics.org/releases/cairo-${version}.tar.xz"
+tarball_sha256="445ed8208a6e4823de1226a74ca319d3600e83f6369f99b14265006599c32ccb"
+imagedeps="build-essential meson ninja-build pkg-config"
+hostdeps="gcc binutils"
+deps="mlibc zlib libpng pixman"
+
+configure() {
+    sirius_cross_file cross.txt compilers
+    meson setup \
+        --cross-file cross.txt \
+        --prefix="${prefix}" \
+        --libdir=lib \
+        -Ddefault_library=static \
+        -Dpng=enabled \
+        -Dzlib=enabled \
+        -Dfreetype=disabled \
+        -Dfontconfig=disabled \
+        -Dxlib=disabled \
+        -Dxcb=disabled \
+        -Dxlib-xcb=disabled \
+        -Dquartz=disabled \
+        -Ddwrite=disabled \
+        -Dtee=disabled \
+        -Dglib=disabled \
+        -Dspectre=disabled \
+        -Dlzo=disabled \
+        -Dsymbol-lookup=disabled \
+        -Dtests=disabled \
+        -Dgtk_doc=false \
+        . "${source_dir}"
+}
+
+build() {
+    ninja -j"${parallelism}"
+}
+
+package() {
+    DESTDIR="${dest_dir}" ninja install
+}

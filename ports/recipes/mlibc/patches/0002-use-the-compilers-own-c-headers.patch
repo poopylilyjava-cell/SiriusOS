@@ -1,0 +1,21 @@
+Prefer GCC's own freestanding C headers to the bundled freestnd-c-hdrs.
+
+mlibc builds with -nostdinc and takes <immintrin.h> and friends from a
+snapshot of an older GCC's headers. Those name target attributes (evex512,
+avx512er, ...) that GCC 16 no longer has, so options/ansi/x86_64/strcmp.cpp
+does not compile. The compiler's own header directory always matches the
+compiler; put it first and keep the snapshot as the fallback it already is
+(-idirafter). The C++ headers still come from freestnd-cxx-hdrs: libstdc++
+cannot exist before the C library does.
+
+--- a/meson.build
++++ b/meson.build
+@@ -135,7 +135,7 @@
+ 		add_project_arguments('-D__MLIBC_DEBUG', language : ['c', 'cpp'])
+ 	endif
+ 
+-	if not freestnd_c_hdrs_dep.found()
++	if not freestnd_c_hdrs_dep.found() or c_compiler.get_id() == 'gcc'
+ 		searchdirs = run_command(c_compiler.cmd_array(), '-print-search-dirs',
+ 					check: true).stdout()
+ 		searchdirs_arr = searchdirs.split('\n')

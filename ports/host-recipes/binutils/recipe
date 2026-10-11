@@ -1,0 +1,30 @@
+#! /bin/sh
+
+# The same binutils, with the same patch and flags, as
+# toolchain/build-sirius.sh builds for the host: keep the two in step.
+
+version=2.47
+revision=1
+tarball_url="https://ftp.gnu.org/gnu/binutils/binutils-${version}.tar.xz"
+tarball_sha256="154ab23b60070e8f27013c22977f1129425d67d1e8acd6e13010e617811e4cff"
+imagedeps="build-essential bison flex texinfo"
+
+configure() {
+    "${source_dir}"/configure \
+        --prefix="${prefix}" \
+        --target="${SIRIUS_TARGET}" \
+        --with-sysroot="${sysroot}" \
+        --disable-nls \
+        --disable-werror \
+        --enable-gold=no \
+        --enable-default-execstack=no \
+        --enable-separate-code
+}
+
+build() {
+    make -j"${parallelism}"
+}
+
+package() {
+    DESTDIR="${dest_dir}" make install
+}

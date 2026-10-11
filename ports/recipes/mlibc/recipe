@@ -1,0 +1,33 @@
+#! /bin/sh
+
+# mlibc with the Sirius sysdeps. The source is not fetched by jinx:
+# tools/ports.sh stages the tree toolchain/build-sirius.sh prepares -- mlibc
+# at the pinned tag, the patches in patches/ applied, and the sysdeps from
+# user/libc/sysdeps/sirius and the kernel's ABI headers copied in -- because
+# a build container sees nothing outside ports/.
+
+version=7.0.0
+revision=1
+source_dir=".staging/mlibc"
+imagedeps="meson ninja-build"
+hostdeps="gcc binutils"
+deps="mlibc-headers"
+
+configure() {
+    sirius_cross_file cross.txt compilers
+    meson setup \
+        --cross-file cross.txt \
+        --prefix="${prefix}" \
+        --libdir=lib \
+        -Ddefault_library=static \
+        -Dno_headers=true \
+        . "${source_dir}"
+}
+
+build() {
+    ninja -j"${parallelism}"
+}
+
+package() {
+    DESTDIR="${dest_dir}" ninja install
+}

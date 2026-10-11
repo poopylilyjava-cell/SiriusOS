@@ -1,0 +1,239 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  # The cross toolchain takes ~30 min to build, so it is cached on the pinned
+  # versions.env hash and rebuilt only when those versions change.
+  toolchain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: toolchain/local
+          key: cross-${{ runner.os }}-${{ hashFiles('toolchain/versions.env', 'toolchain/build-cross.sh') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: sudo apt-get update && sudo apt-get install -y build-essential bison flex texinfo libgmp-dev libmpfr-dev libmpc-dev
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: ./toolchain/build-cross.sh -j $(nproc)
+
+  # The system toolchain for userland: x86_64-sirius binutils and gcc, mlibc
+  # with the Sirius sysdeps, and libstdc++. It installs beside the kernel's
+  # compiler, so its cache holds both, plus the sysroot. The C library is
+  # part of it, so a change to the sysdeps or to the kernel's ABI headers
+  # rebuilds it -- slow, but never stale.
+  toolchain-sirius:
+    needs: toolchain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            toolchain/local
+            sysroot
+          key: sirius-${{ runner.os }}-${{ hashFiles('toolchain/versions.env', 'toolchain/build-cross.sh', 'toolchain/build-sirius.sh', 'ports/**/*.patch', 'user/libc/**', 'kernel/include/sirius/**') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: toolchain/local
+          key: cross-${{ runner.os }}-${{ hashFiles('toolchain/versions.env', 'toolchain/build-cross.sh') }}
+          fail-on-cache-miss: true
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: sudo apt-get update && sudo apt-get install -y build-essential bison flex texinfo libgmp-dev libmpfr-dev libmpc-dev meson ninja-build rsync patch git
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: ./toolchain/build-sirius.sh -j $(nproc)
+
+  build-and-boot:
+    needs: toolchain-sirius
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      # Both compilers and the sysroot; see the toolchain-sirius job.
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            toolchain/local
+            sysroot
+          key: sirius-${{ runner.os }}-${{ hashFiles('toolchain/versions.env', 'toolchain/build-cross.sh', 'toolchain/build-sirius.sh', 'ports/**/*.patch', 'user/libc/**', 'kernel/include/sirius/**') }}
+          fail-on-cache-miss: true
+      - run: sudo apt-get update && sudo apt-get install -y cmake ninja-build nasm qemu-system-x86 ovmf mtools parted dosfstools xorriso imagemagick
+      - run: make kernel
+      - run: make userland
+      - run: test -x build/userland/bin/cxxtest.elf
+
+      # Boot regressions are cheap to catch now and expensive to bisect later.
+      # The kernel must print this marker on the serial port within 30s.
+      # DEFAULT_ENTRY is a 1-based index into boot/limine.conf, not a name.
+      - name: boot in qemu
+        run: |
+          make image
+          timeout 60 ./tools/run-qemu.sh --headless --log boot.log || true
+          cat boot.log
+          grep -q "sirius: boot ok" boot.log
+
+      # The exit test for M3, on the same boot: /bin/init, read from the
+      # FAT32 root over AHCI, reads a file, writes one, forks a child that
+      # execs /bin/hello, and runs the fstest system call suite.
+      - name: init runs from disk, forks and execs
+        run: |
+          grep -q "\[init\] M3 exit test passed" boot.log
+          grep -q "\[fstest\] all [0-9]* checks passed" boot.log
+          grep -q "sirius: all user processes exited" boot.log
+          ! grep -q "KERNEL PANIC" boot.log
+
+      # The exit test for M4, still on the same boot: init execs /bin/cxxtest,
+      # a C++ program built by x86_64-sirius-g++ against mlibc and libstdc++.
+      # The destructor line comes after main() has returned: it shows the C
+      # library's exit path running, not just its entry.
+      - name: a C++ program on mlibc and libstdc++ runs
+        run: |
+          grep -q "\[cxxtest\] M4 exit test passed" boot.log
+          grep -q "\[cxxtest\] static destructor ran" boot.log
+          ! grep -q "\[cxxtest\] FAILED" boot.log
+          ! grep -q "skipping the M4 exit test" boot.log
+
+      # The exit test for M6 that needs no ports: signals, pipes, sockets that
+      # pass descriptors, shared memory mapped by two processes, poll, epoll.
+      # (libwayland's suite is tools/check-wayland.sh; it needs the jinx
+      # ports tree, which CI does not build.)
+      - name: processes talk to each other
+        run: |
+          grep -q "\[ipctest\] M6 exit test passed" boot.log
+          grep -q "\[ipctest\] shared memory: .* mapped coherently in two processes" boot.log
+          ! grep -q "\[ipctest\] FAILED" boot.log
+
+      # Threads, on the same boot: mutexes and condition variables, a
+      # descriptor closed under a thread blocked on it, signals for one
+      # thread, and a threaded process ending by exit, signal, fork and exec.
+      - name: threads share a process
+        run: |
+          grep -q "\[threadtest\] threads test passed" boot.log
+          ! grep -q "\[threadtest\] FAILED" boot.log
+
+      # What the kernel wrote must satisfy other FAT implementations.
+      - name: the disk the kernel wrote is clean
+        run: ./tools/check-disk.sh build/sirius.img
+
+      # The exit test for M2: two user programs on different cores, their
+      # output interleaved, both exiting cleanly.
+      - name: user programs run on separate cores
+        run: |
+          DEFAULT_ENTRY=8 ./tools/mkimage.sh
+          timeout 60 ./tools/run-qemu.sh --headless --log tickers.log || true
+          cat tickers.log
+          ./tools/check-exit-test.sh tickers.log
+
+      # The fault handlers are the hardest thing to notice breaking: a kernel
+      # that silently triple-faults instead of reporting looks identical to one
+      # that simply did not fault. Assert the dumps, not just the happy path.
+      - name: page fault is reported
+        run: |
+          DEFAULT_ENTRY=3 ./tools/mkimage.sh
+          timeout 60 ./tools/run-qemu.sh --headless --log pf.log || true
+          cat pf.log
+          grep -q "#PF page fault" pf.log
+          grep -q "not-present write kernel" pf.log
+
+      - name: double fault survives a stack overflow
+        run: |
+          DEFAULT_ENTRY=4 ./tools/mkimage.sh
+          timeout 60 ./tools/run-qemu.sh --headless --log df.log || true
+          cat df.log
+          grep -q "#DF double fault" df.log
+
+      # The allocators must return every page and every object, and the
+      # fault-driven paths (demand paging, copy-on-write) must resolve rather
+      # than panic. The scheduler tests then run on all four CPUs (preemption,
+      # a contended mutex, reaping of exited threads), and the VFS tests on
+      # a scratch tmpfs.
+      - name: memory and scheduler selftests
+        run: |
+          DEFAULT_ENTRY=6 ./tools/mkimage.sh
+          timeout 120 ./tools/run-qemu.sh --headless --log selftest.log || true
+          cat selftest.log
+          grep -q "sirius: selftest ok" selftest.log
+          ! grep -q "selftest FAILED" selftest.log
+
+      # Misbehaving user programs are killed, or have bad pointers refused,
+      # while the kernel and the programs beside them carry on.
+      - name: user faults are contained
+        run: |
+          DEFAULT_ENTRY=7 ./tools/mkimage.sh
+          timeout 60 ./tools/run-qemu.sh --headless --log userfault.log || true
+          cat userfault.log
+          grep -q "killed by #PF page fault at rip=.*, address 0x0 " userfault.log
+          grep -q "killed by #PF page fault at rip=.*, address 0xffffffff80000000" userfault.log
+          grep -q "killed by #GP general protection fault" userfault.log
+          grep -q "killed by #UD invalid opcode" userfault.log
+          grep -q "write from bad pointers refused" userfault.log
+          [ "$(grep -c '\] done' userfault.log)" -eq 6 ]
+          grep -q "sirius: all user processes exited" userfault.log
+          ! grep -q "KERNEL PANIC" userfault.log
+
+      # The exit test for M7 (and with it M5's): boot to the desktop, and
+      # QEMU's monitor plays the user with the PS/2 mouse and keyboard --
+      # launches three applications, resizes, moves and closes windows, and
+      # types commands into the terminal. The cost of a frame is only held to
+      # 30 fps when the runner has KVM; under emulation it is reported.
+      - name: the desktop is usable
+        run: |
+          make image ENTRY=9
+          BOOT_TIMEOUT=180 ./tools/check-desktop.sh desktop.png
+          cat desktop.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-screenshot
+          path: desktop.png
+
+      - name: framebuffer is drawn
+        run: |
+          DEFAULT_ENTRY=1 ./tools/mkimage.sh
+          ./tools/screenshot.sh screenshot.png 8
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: boot-screenshot
+          path: screenshot.png
+
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-logs
+          path: |
+            boot.log
+            pf.log
+            df.log
+            selftest.log
+            userfault.log
+            tickers.log
+            desktop.log
+            build/qemu.log
+            build/kernel/sirius.map
+
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      # Dear ImGui is a submodule, and the rasterizer's tests draw with it.
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      # The storage tests build real disk images: GPT with parted, FAT32 with
+      # mkfs.fat and mtools, and check the kernel's writes with fsck.fat.
+      - run: sudo apt-get update && sudo apt-get install -y cmake ninja-build parted dosfstools mtools
+      - run: make test
+      # The desktop on the host, without a window: it must build and draw.
+      - run: make harness HARNESS_ARGS="--headless 50 --size 1920x1080"
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck -S warning toolchain/*.sh tools/*.sh

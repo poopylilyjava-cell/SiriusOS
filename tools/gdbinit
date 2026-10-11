@@ -1,0 +1,24 @@
+# gdb setup for debugging the Sirius kernel under QEMU's gdb stub.
+set arch i386:x86-64
+set disassembly-flavor intel
+set pagination off
+set confirm off
+target remote localhost:1234
+
+# The kernel runs in the higher half; QEMU starts the CPU in 16-bit real mode,
+# so don't trust the frame until Limine has handed off.
+define hook-stop
+    printf "rip=%#lx  cr3=%#lx\n", $rip, $cr3
+end
+
+# Walk the 4-level page tables for a virtual address.
+#   usage: pagewalk 0xffffffff80000000
+define pagewalk
+    set $va = (unsigned long)$arg0
+    printf "va %#lx\n", $va
+    printf "  pml4 idx %3d  pdpt idx %3d  pd idx %3d  pt idx %3d  off %#x\n", \
+        ($va >> 39) & 0x1ff, ($va >> 30) & 0x1ff, \
+        ($va >> 21) & 0x1ff, ($va >> 12) & 0x1ff, $va & 0xfff
+end
+
+echo \n== sirius: connected. 'c' to continue, 'pagewalk <va>' to inspect paging ==\n

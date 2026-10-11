@@ -1,0 +1,14 @@
+Teach config.sub the sirius operating system, so that configure accepts
+--host=x86_64-sirius.
+
+--- a/config.sub
++++ b/config.sub
+@@ -1754,7 +1754,7 @@
+ 	     | bosx* | nextstep* | cxux* | oabi* \
+ 	     | ptx* | ecoff* | winnt* | domain* | vsta* \
+ 	     | udi* | lites* | ieee* | go32* | aux* | hcos* \
+-	     | chorusrdb* | cegcc* | glidix* | serenity* \
++	     | chorusrdb* | cegcc* | glidix* | serenity* | sirius* \
+ 	     | cygwin* | msys* | moss* | proelf* | rtems* \
+ 	     | midipix* | mingw32* | mingw64* | mint* \
+ 	     | uxpv* | beos* | mpeix* | udk* | moxiebox* \
